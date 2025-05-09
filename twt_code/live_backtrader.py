@@ -186,8 +186,8 @@ if __name__ == '__main__':
     code_list =['603429.SH']
 
     # 添加数据
-    datas = store.getdatas(code_list=code_list, timeframe=bt.TimeFrame.Minutes, fromdate=datetime(2020, 1, 1),
-                           todate=datetime(2021, 1, 1), live=False)
+    datas = store.getdatas(code_list=code_list, timeframe=bt.TimeFrame.Days, fromdate=datetime(2020, 1, 1),
+                           todate=datetime(2021, 1, 1), live=True)
 
     for d in datas:
         # print(len(d))

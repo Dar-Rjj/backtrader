@@ -6,7 +6,7 @@
 #         ('use_real_trading', False),  # 默认参数
 #     )
 # 如果需要发送委托需要自行插入broker的buy()方法
-
+from tabulate import tabulate
 
 import backtrader as bt
 from qmtbt import QMTStore
@@ -109,62 +109,167 @@ class my_broker:
         if self.use_real_trading:
             self.xt_trader.cancel_order_stock(self.acc, order_id)
 
-    def query(self):
-        if self.use_real_trading:
-            order = self.xt_trader.query_stock_orders(self.acc, False)
-            return order
+    def query_order(self):
+        """查询委托订单（支持真实/模拟交易）"""
+
+        orders = self.xt_trader.query_stock_orders(self.acc, False)
+        order_list = []
+        orders = self.xt_trader.query_stock_orders(self.acc, False)
+
+        # 检查列表是否为空
+        # if orders:
+        #     # 获取第一个订单对象以查看其属性
+        #     first_order = orders[0]
+        #
+        #     # 使用 dir() 函数查看第一个订单对象的所有属性和方法
+        #     attributes = dir(first_order)
+        #
+        #     # 过滤掉特殊方法和属性（以 '__' 开头和结尾的）
+        #     attributes = [attr for attr in attributes if not attr.startswith('__') and not attr.endswith('__')]
+        #
+        #     # 打印出所有属性
+        #     print("订单对象的属性和方法:", attributes)
+        # else:
+        #     print("没有找到任何订单。")
+
+        for o in orders:
+
+            order_time = datetime.fromtimestamp(o.order_time).strftime('%Y-%m-%d %H:%M:%S')
+            order_list.append({
+                "委托时间": order_time,
+                "证券代码": o.stock_code,
+                "方向":o.order_type,
+                "委托价": o.price,
+                "状态":o.order_status,
+                "委托ID": o.order_id,
+                "数量":o.order_volume
+            })
+
+        print("\n当日委托明细：")
+        print(tabulate([list(o.values()) for o in order_list],
+                       headers=order_list[0].keys(),
+                       tablefmt="grid"))
+        return order_list
+
+
+    def query_asset(self):
+        asset = self.xt_trader.query_stock_asset(self.acc)
+        asset_data = {
+            "总资产": round(asset.total_asset, 2),
+            "持仓市值": round(asset.market_value, 2),
+        }
+        print("\n账户资产概览：")
+        print(tabulate([list(asset_data.values())],
+                       headers=asset_data.keys(),
+                       floatfmt=".2f",
+                       tablefmt="grid"))
+        return asset_data
+
+    def query_trades(self):
+        """查询成交记录（支持真实/模拟交易）"""
+        print("\n====== 成脚明细 ======")
+        try:
+            trades = self.xt_trader.query_stock_trades(self.acc)
+            if not trades:
+                print('今日没有成交')
+            trade_list = []
+            for t in trades:
+                trade_list.append({
+                    "成交时间": datetime.datetime.fromtimestamp(t.trade_time / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+                    "证券代码": t.stock_code,
+                    "方向": self._format_direction(t.order_type),
+                    "成交价": t.price,
+                    "数量": t.volume,
+                    "成交ID": t.trade_id
+                })
+
+
+        except Exception as e:
+            print(f"成交查询异常: {str(e)}")
+            return []
+
+    def query_stock_positions(self):
+        positions = self.xt_trader.query_stock_positions(self.acc)
+        print("\n====== 持仓明细 ======")
+
+        for pos in positions:
+            print(f"股票: {pos.stock_code} | "
+                  f"数量: {pos.volume} | "
+                  f"可用: {pos.can_use_volume} | "
+                  f"成本: {pos.open_price:.2f}")
+        return positions
+
+
 class TestStrategy(bt.Strategy):
     params = (
-        ('use_real_trading', False),  #
+        ('use_real_trading', False),
         ('any', 50),
     )
-    def log(self, txt, dt=None):
-        dt = dt or self.datas[0].datetime.date(0)
-        print('%s, %s' % (dt.isoformat(), txt))
+
+    def log(self, txt, dt=None, data=None):
+        dt = dt or data.datetime.date(0)
+        print(f'{dt.isoformat()}, {data._name}, {txt}')
 
     def __init__(self):
-        self.dataclose = self.datas[0].close
-        self.order = None
-        self.mbroker = my_broker(use_real_trading=self.p.use_real_trading)  # 默认不使用实盘
+        # 用字典跟踪每个数据的订单和状态
+        self.orders = {}
+        self.bar_executed = {}
+        for d in self.datas:
+            self.orders[d] = None  # 跟踪每个数据的订单
+            self.bar_executed[d] = 0  # 跟踪每个数据的买入时间
+
+        self.mbroker = my_broker(use_real_trading=self.p.use_real_trading)
 
     def notify_order(self, order):
+        # 获取对应的数据对象
+        d = order.data
         if order.status in [order.Submitted, order.Accepted]:
             return
 
         if order.status in [order.Completed]:
             if order.isbuy():
-                self.log('BUY EXECUTED, %.2f' % order.executed.price)
+                self.log(f'BUY EXECUTED {order.executed.price:.2f}', data=d)
             elif order.issell():
-                self.log('SELL EXECUTED, %.2f' % order.executed.price)
-
-            self.bar_executed = len(self)
+                self.log(f'SELL EXECUTED {order.executed.price:.2f}', data=d)
+            self.bar_executed[d] = len(self)  # 记录当前数据的买入时间
 
         elif order.status in [order.Canceled, order.Margin, order.Rejected]:
-            self.log('Order Canceled/Margin/Rejected')
+            self.log('Order Canceled/Margin/Rejected', data=d)
 
-        self.order = None
+        # 重置该数据的订单状态
+        self.orders[d] = None
 
     def next(self):
+        for d in self.datas:
+            stock_code = d._name
+            close_price = d.close[0]
+            position = self.getposition(d)
 
-        data = self.datas[0]
-        stock_code = data._name
-        self.log('Close, %.2f' % self.dataclose[0])
+            # 如果该数据有未完成订单则跳过
+            if self.orders[d]:
+                continue
 
-        if self.order:
-            return
+            # 空仓条件（针对当前数据）
+            if not position:
+                if close_price < d.close[-1] and d.close[-1] < d.close[-2]:
+                    self.mbroker.buy(
+                        stock_code=stock_code,
+                        price=close_price,
+                        quantity=200
+                    )
+                    self.log(f'BUY CREATE {close_price:.2f}', data=d)
+                    self.orders[d] = self.buy(data=d)  # 记录该数据的订单
 
-        if not self.position:
-            if self.dataclose[0] < self.dataclose[-1]:
-                if self.dataclose[-1] < self.dataclose[-2]:
-                    # 模拟下单
-                    self.mbroker.buy(stock_code=stock_code, price=1, quantity=200)
-                    self.log('BUY CREATE, %.2f' % self.dataclose[0])
-                    self.order = self.buy()
-
-        else:
-            if len(self) >= (self.bar_executed + 5):
-                self.log('SELL CREATE, %.2f' % self.dataclose[0])
-                self.order = self.sell()
+            # 持仓条件（针对当前数据）
+            else:
+                if (len(self) >= (self.bar_executed[d] + 5)):
+                    self.mbroker.sell(
+                        stock_code=stock_code,
+                        price=close_price,
+                        quantity=200
+                    )
+                    self.log(f'SELL CREATE {close_price:.2f}', data=d)
+                    self.orders[d] = self.sell(data=d)
 
 class AnotherStrategy(bt.Strategy):
     params = (('period1', 10),
@@ -210,7 +315,7 @@ class AnotherStrategy(bt.Strategy):
             if self.dataclose[0] > self.dataclose[-1]:
                 if self.dataclose[-1] > self.dataclose[-2]:
                     # 模拟下单
-                    self.mbroker.buy(stock_code=stock_code, price=1000, quantity=200)
+                    self.mbroker.buy(stock_code=stock_code, price=self.dataclose[0], quantity=200)
                     self.log('BUY CREATE, %.2f' % self.dataclose[0])
                     self.order = self.buy()
 
@@ -228,3 +333,36 @@ class SmaCross(bt.SignalStrategy):
         sma1, sma2 = bt.ind.SMA(period=self.p.period1), bt.ind.SMA(period=self.p.period2)
         crossover = bt.ind.CrossOver(sma1, sma2)
         self.signal_add(bt.SIGNAL_LONG, crossover)
+
+
+class MultiSMACrossStrategy(bt.Strategy):
+    params = (
+        ('fast_length', 5),
+        ('slow_length', 25)
+    )
+
+    def __init__(self):
+        self.crossovers = []
+
+        for d in self.datas:
+            ma_fast = bt.ind.SMA(d, period=self.params.fast_length)
+            ma_slow = bt.ind.SMA(d, period=self.params.slow_length)
+
+            self.crossovers.append(bt.ind.CrossOver(ma_fast, ma_slow))
+
+    def next(self):
+        for i, d in enumerate(self.datas):
+            if not self.getposition(d).size:
+                if self.crossovers[i] > 0:
+                    self.buy(data=d, size=100)
+            elif self.crossovers[i] < 0:
+                if self.getposition(d).size > 0:
+                    self.close(data=d)
+
+if __name__ == '__main__':
+    broker=my_broker(use_real_trading=True)
+    broker.query_stock_positions()
+    broker.query_order()
+    broker.query_asset()
+    broker.query_trades()
+

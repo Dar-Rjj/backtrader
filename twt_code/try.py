@@ -1,3 +1,6 @@
+# 此方法实现了为每一只股票单独选择最优参数进行回测
+
+
 from sko.GA import GA
 
 import backtrader as bt
@@ -83,7 +86,7 @@ def back_test(selected_strategy,
               live=False,
               stocks=['000001.SZ'],
               fromdate=datetime(2020, 1, 1),
-              todate=datetime(2020, 4, 1),
+              todate=datetime(2021, 4, 1),
               ):
     """多股票独立参数回测"""
 
@@ -97,8 +100,8 @@ def back_test(selected_strategy,
         data = store.getdata(
             dataname=stock,
             timeframe=bt.TimeFrame.Days,
-            fromdate=fromdate,
-            todate=todate,
+            fromdate=datetime(2020, 1, 1),
+            todate=datetime(2021, 4, 1),
             live=live
         )
         cerebro.adddata(data)
@@ -116,7 +119,7 @@ def back_test(selected_strategy,
 
     # 运行回测
         cerebro.run()
-        cerebro.plot(style='candlestick', iplot=False)
+        # cerebro.plot(style='candlestick', iplot=False)
         print(f"\n总资产: {cerebro.broker.getvalue():.2f}")
         results[stock] = cerebro.broker.getvalue()
     for stock, total_value in results.items():
@@ -128,31 +131,32 @@ def back_test(selected_strategy,
 if __name__ == '__main__':
     stra=TestStrategy
 
+
     # Sko 多只股票同时测试，得到多组参数
-    # optuna_params = finetune(
-    #     SmaCross,
-    #     method='Sko',
-    #     stocks=['600519.SH', '000001.SZ', '300750.SZ'],
-    #     count=1
-    # )
-    # print(optuna_params)
-
-
-    # Optuna 多只股票同时测试，得到多组参数
     optuna_params = finetune(
         stra,
-        method='Optuna',
-        stocks=['600519.SH'],
+        method='Sko',
+        stocks=['600519.SH', '000001.SZ', '300750.SZ'],
         count=1
     )
     print(optuna_params)
 
-    # back_test(
-    #     selected_strategy=stra,
-    #     stocks=['600519.SH', '000001.SZ', '300750.SZ'],
-    #     optimized_params=optuna_params,
-    #
+
+    # Optuna 多只股票同时测试，得到多组参数
+    # optuna_params = finetune(
+    #     stra,
+    #     method='Optuna',
+    #     stocks=['600519.SH'],
+    #     count=1
     # )
+    # print(optuna_params)
+
+    back_test(
+        selected_strategy=stra,
+        stocks=['600519.SH', '000001.SZ', '300750.SZ'],
+        optimized_params=optuna_params,
+
+    )
 
 
 
@@ -174,13 +178,15 @@ if __name__ == '__main__':
 
 
 # 实时交易，但不能多只股票同时
-    # back_test(
-    #     selected_strategy=stra,
-    #     optimized_params=optuna_params,
-    #     use_real_trading=True,
-    #     stocks=['600519.SH'],  # 使用与优化时相同的标的
-    #     live=True
-    # )
+#     back_test(
+#         selected_strategy=stra,
+#         optimized_params=optuna_params,
+#         use_real_trading=False,
+#         stocks=['600519.SH'],  # 使用与优化时相同的标的
+#         live=False
+#     )
+
+
 
 
 
