@@ -182,7 +182,8 @@ def generate_test_periods(fromdate, todate, window_months=3, step_months=1):
         # 计算窗口结束日期
         current_end = current_start + relativedelta(months=+window_months)
         if current_end > todate:
-            current_end = todate
+            break
+            # current_end = todate
         test_periods.append((current_start, current_end))
 
         # 移动到下一个窗口的起始日期
@@ -331,7 +332,7 @@ def back_test(selected_strategy,
 
 
 if __name__ == '__main__':
-    stra=TestStrategy
+    stra=MultiSMACrossStrategy
 
     code_list = xtdata.get_stock_list_in_sector('上证A股')
 
@@ -367,7 +368,7 @@ if __name__ == '__main__':
         fromdate=datetime(2023, 1, 1),
         todate=datetime(2025, 4, 1),
         window_months=3,
-        step_months=1
+        step_months=2
     )
 
 
