@@ -250,26 +250,25 @@ class TestStrategy(bt.Strategy):
                 continue
 
             # 空仓条件（针对当前数据）
-            if not position:
-                if close_price < d.close[-1] and d.close[-1] < d.close[-2]:
-                    self.mbroker.buy(
-                        stock_code=stock_code,
-                        price=close_price,
-                        quantity=200
-                    )
-                    self.log(f'BUY CREATE {close_price:.2f}', data=d)
-                    self.orders[d] = self.buy(data=d)  # 记录该数据的订单
+
+            if close_price < d.close[-1] and d.close[-1] < d.close[-2]:
+                self.mbroker.buy(
+                    stock_code=stock_code,
+                    price=close_price,
+                    quantity=1000
+                )
+                self.log(f'BUY CREATE {close_price:.2f}', data=d)
+                self.orders[d] = self.buy(data=d)  # 记录该数据的订单
 
             # 持仓条件（针对当前数据）
-            else:
-                if (len(self) >= (self.bar_executed[d] + 5)):
-                    self.mbroker.sell(
-                        stock_code=stock_code,
-                        price=close_price,
-                        quantity=200
-                    )
-                    self.log(f'SELL CREATE {close_price:.2f}', data=d)
-                    self.orders[d] = self.sell(data=d)
+            if (len(self) >= (self.bar_executed[d] + 5)):
+                self.mbroker.sell(
+                    stock_code=stock_code,
+                    price=close_price,
+                    quantity=1000
+                )
+                self.log(f'SELL CREATE {close_price:.2f}', data=d)
+                self.orders[d] = self.sell(data=d)
 
 class AnotherStrategy(bt.Strategy):
     params = (('period1', 10),

@@ -1,6 +1,5 @@
 # 此方法实现了为每一只股票单独选择最优参数进行回测
-
-
+from dateutil.relativedelta import relativedelta
 from sko.GA import GA
 
 import backtrader as bt
@@ -76,7 +75,7 @@ def finetune(Strategy, method='Sko', stocks=['000001.SZ'],
         optimized_params = {k: int(v) for k, v in zip(param_names, best_x)}
         print("\n===== 参数优化历史记录 =====")
         for i, record in enumerate(history):
-            print(f"Iter {i + 1}: Params={record['params']} => Return={record['return']:.2f}")
+            print(f"Iter {i + 1}: Params={record['params']} => Return={record['avg_return']:.2f}")
 
         # 最佳结果
         print(f"\n最佳参数: {optimized_params},{best_y}")
@@ -120,6 +119,168 @@ def finetune(Strategy, method='Sko', stocks=['000001.SZ'],
 
 
 
+def validation(
+              selected_strategy,
+              optimized_params,
+              use_real_trading=False,
+              live=False,
+              stocks=['000001.SZ'],
+              fromdate=datetime(2020, 1, 1),
+              todate=datetime(2021, 4, 1),
+              num=3,
+              ):
+    store = QMTStore()
+
+    results = {}
+
+    for stock in stocks:
+        cerebro = bt.Cerebro()
+        # 加载数据
+        data = store.getdata(
+            dataname=stock,
+            timeframe=bt.TimeFrame.Days,
+            fromdate=fromdate,
+            todate=todate,
+            live=live
+        )
+        cerebro.adddata(data)
+        # 添加带独立参数的策略
+        cerebro.addstrategy(
+            selected_strategy,
+            **optimized_params,
+        )
+
+        # 资金管理
+        cerebro.broker.setcash(1000000.0)
+        cerebro.broker.setcommission(commission=0.001)
+
+        # 运行回测
+        cerebro.run()
+        # cerebro.plot(style='candlestick', iplot=False)
+        print(f"\n总资产: {cerebro.broker.getvalue():.2f}")
+        results[stock] = cerebro.broker.getvalue()
+    for stock, total_value in results.items():
+        print(f"{stock} 总资产: {total_value:.2f}")
+    sorted_reslut=sorted(results.items(),key=lambda x:x[1],reverse=True)[:num]
+    i=0
+    for stock, total_value in sorted_reslut:
+        i += 1  # 确保在每次迭代时递增 i
+        print(f"profit top {i} :{stock} 总资产: {total_value:.2f}")
+    top_stocks = [stock for stock, total_value in sorted_reslut]
+    return top_stocks
+
+
+from datetime import datetime, timedelta
+import backtrader as bt
+
+
+def generate_test_periods(fromdate, todate, window_months=3, step_months=1):
+    """生成按指定步长滚动的测试时间段"""
+    test_periods = []
+    current_start = fromdate
+    while current_start < todate:
+        # 计算窗口结束日期
+        current_end = current_start + relativedelta(months=+window_months)
+        if current_end > todate:
+            current_end = todate
+        test_periods.append((current_start, current_end))
+
+        # 移动到下一个窗口的起始日期
+        current_start = current_start + relativedelta(months=+step_months)
+    return test_periods
+
+
+def validation_cross(
+        selected_strategy,
+        optimized_params,
+        live=False,
+        stocks=['000001.SZ'],
+        fromdate=datetime(2020, 1, 1),
+        todate=datetime(2021, 4, 1),
+        num=3,
+        window_months=3,  # 每个测试窗口的月数
+        step_months=1  # 窗口滚动的步长
+):
+    store = QMTStore()
+
+    # 生成交叉验证的测试时间段
+    test_periods = generate_test_periods(fromdate, todate, window_months, step_months)
+
+    # 初始化结果存储结构: {股票: [各期总资产]}
+    results = {stock: [] for stock in stocks}
+
+    # 遍历所有测试窗口
+    for period_idx, (test_from, test_to) in enumerate(test_periods, 1):
+        print(
+            f"\n=== 正在验证第 {period_idx}/{len(test_periods)} 个测试窗口 [{test_from.date()} - {test_to.date()}] ===")
+
+        period_results = {}
+        for stock in stocks:
+            cerebro = bt.Cerebro()  # 禁用默认统计以加快速度
+
+            # 加载当前窗口数据
+            data = store.getdata(
+                dataname=stock,
+                timeframe=bt.TimeFrame.Days,
+                fromdate=test_from,
+                todate=test_to,
+                live=live
+            )
+            print(len(data))
+            # if len(data) < 5:  # 至少需要5个数据点形成有效测试
+            #     print(f"警告：{stock} 在 {test_from.date()}-{test_to.date()} 数据不足({len(data)}条)，已跳过")
+            #     period_results[stock]=0
+            #     continue
+            cerebro.adddata(data)
+
+            # 添加策略（使用优化后的参数）
+            cerebro.addstrategy(
+                selected_strategy,
+             ** optimized_params,
+            )
+
+            # 资金管理设置
+            cerebro.broker.setcash(1000000.0)
+            cerebro.broker.setcommission(commission=0.001)
+
+            # 运行回测
+            cerebro.run()
+
+            # 记录当前窗口结果
+            period_results[stock] = cerebro.broker.getvalue()
+            print(f"{stock} 窗口资产: {period_results[stock]:.2f}")
+
+        # 汇总当前窗口结果
+        for stock in stocks:
+            results[stock].append(period_results[stock])
+
+    # 计算各股票的平均收益率
+    final_scores = {}
+    for stock, values in results.items():
+        # 计算每个窗口的收益率（避免除零错误）
+        returns = []
+        initial_cash = 1000000.0
+        for v in values:
+            returns.append((v - initial_cash) / initial_cash)
+        print(sum(returns),len(returns) )
+        # 使用夏普比率（需要安装pyfolio）或平均收益率
+        final_scores[stock] = sum(returns)*1.0 / len(returns)  # 简单平均收益率
+
+    # 按收益率排序并取前num名
+    sorted_stocks = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)[:num]
+
+    # 打印最终结果
+    print("\n=== 交叉验证最终结果 ===")
+    for rank, (stock, score) in enumerate(sorted_stocks, 1):
+        print(f"Top {rank}: {stock} 平均收益率: {score * 100:.2f}%")
+        print(f"   各期详细结果: {[f'{v:.2f}' for v in results[stock]]}")
+
+    return [stock for stock, _ in sorted_stocks]
+
+
+# 示例用法
+
+
 def back_test(selected_strategy,
 
               optimized_params,
@@ -145,6 +306,7 @@ def back_test(selected_strategy,
             todate=datetime(2021, 4, 1),
             live=live
         )
+
         cerebro.adddata(data)
 
         # 添加带独立参数的策略
@@ -163,8 +325,7 @@ def back_test(selected_strategy,
         # cerebro.plot(style='candlestick', iplot=False)
         print(f"\n总资产: {cerebro.broker.getvalue():.2f}")
         results[stock] = cerebro.broker.getvalue()
-    for stock, total_value in results.items():
-        print(f"{stock} 总资产: {total_value:.2f}")
+
 
     return cerebro
 
@@ -179,13 +340,36 @@ if __name__ == '__main__':
     # Sko 多只股票同时测试，得到多组参数
     optuna_params = finetune(
         stra,
-        method='Optuna',
+        method='Sko',
         # stocks=['600519.SH', '000001.SZ', '300750.SZ'],
-        stocks=['600051.SH'],
-        # stocks=code_list[:10],
-        count=10
+        # stocks=['600051.SH'],
+        stocks=code_list[:20],
+        # stocks=['600519.SH', '000001.SZ', '300750.SZ'],
+        fromdate=datetime(2024, 1, 1),
+        todate=datetime(2025, 4, 1),
+        count=1
+
     )
     print(optuna_params)
+
+    validation(
+        selected_strategy=stra,
+        stocks=['600519.SH', '000001.SZ', '300750.SZ'],
+        fromdate=datetime(2023, 1, 1),
+        todate=datetime(2025, 4, 1),
+        optimized_params=optuna_params,
+
+    )
+    top_stocks = validation_cross(
+        selected_strategy=stra,
+        stocks=['600519.SH', '000001.SZ', '300750.SZ'],
+        optimized_params=optuna_params,
+        fromdate=datetime(2023, 1, 1),
+        todate=datetime(2025, 4, 1),
+        window_months=3,
+        step_months=1
+    )
+
 
 
     # Optuna 多只股票同时测试，得到多组参数
