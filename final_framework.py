@@ -381,13 +381,13 @@ if __name__ == '__main__':
     #     count=1
     # )
     # print(optuna_params)
-
     # back_test(
     #     selected_strategy=stra,
     #     stocks=['600519.SH', '000001.SZ', '300750.SZ'],
     #     optimized_params=optuna_params,
     #
     # )
+
 
 
 
